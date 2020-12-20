@@ -51,7 +51,7 @@ verses = load_data()
 poets = sorted(list(set(verses['poet_with_century'])))
 
 
-words = st.text_input(label="لطفاً کلمه یا کلمات مورد نظرتان را وارد کنید. کلمه‌‌های مختلف را با با کاما (،) از هم جدا کنید",value='تلخ، شیرین')
+words = st.text_input(label="لطفاً کلمه یا کلمات مورد نظرتان را وارد کنید. کلمه‌‌های مختلف را با با ویرگول (،) از هم جدا کنید",value='تلخ، شیرین')
 poets_list = st.multiselect(label='لطفاً شاعران مورد نظرتان را انتخاب کنید',options=poets,default=poets)
 verses = verses [verses['poet_with_century'].isin(poets_list)]
 
