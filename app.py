@@ -13,10 +13,32 @@ def get_table_download_link(df,text="Download CSV file"):
     href = f'<a href="data:file/csv;base64,{b64_enc}" download="poems.tsv" center="true">{text}</a>'
     return href
 
+def sentiment_of(text,lexicon):
+    words = text.replace('.','').replace('،','').replace('؟','').split(' ')
+    sentiment_sum=0.0
+    sentiment_count=0.0
+    for w in words:
+        w=w.strip()
+        if w in lexicon:
+            sentiment_sum += lexicon[w]
+            sentiment_count += 1
+    return sentiment_sum/(sentiment_count+1e-10)
+
 @st.cache()
 def load_data():
     verses =  pd.read_csv('verses.tsv',sep='\t').dropna()
-    verses['poet_with_century'] = verses['poet'] + ' از قرن ' +verses['century'].astype('str')#verses.apply(lambda row: f"{row['poet']} (قرن {row['century']})",axis=1)
+    verses['poet_with_century'] = verses['poet'] + ' از قرن ' +verses['century'].astype('str')
+    
+    sentiments = pd.read_csv('https://raw.githubusercontent.com/Text-Mining/Persian-Sentiment-Resources/master/PersianSWN.csv',sep='\t',header=None)
+    sentiments[1] = sentiments[1].apply(lambda s: str(s).split(' ')[0]) # Just to stay basic. Better preprocessing probably helps
+    sentiments[5] = sentiments[2]*(sentiments[3]-sentiments[4]) # Take the weighted-by-confidence sum of sentiments for each word
+
+    sentiments = sentiments.groupby(by=[1])[5].mean() # Group by word and take mean
+
+    sentiments_map  = sentiments[sentiments!=0].to_dict()
+    sentiments_map = dict({ (k,v) for (k,v) in sentiments_map.items() if ' ' not in k})
+    
+    verses['sentiment'] = verses['verse'].apply(lambda verse: sentiment_of(verse,sentiments_map))
     return verses
 
 st.set_page_config(page_title="بررسی استفاده از عبارات مختلف در اشعار فارسی در طول زمان از قرن سوم هجری تا دوران معاصر",layout='wide')
@@ -38,11 +60,15 @@ st.markdown(f' در مجموع {len(verses)} «مصرع» شعر از این ش�
 
 groupby_var = st.radio(label='دسته‌بندی بر اساس شاعر یا قرن؟',options=['century','poet_with_century'],index=0,format_func=lambda v: 'قرن' if v=='century' else 'شاعر')
 
-ngram_all = verses.groupby(by=[groupby_var])['verse'].count()#.plot.bar()
+show_sentiments = st.checkbox(label=f'نمایش حس (سنتیمنت)‌ شعرهای هر {"قرن" if groupby_var=="century" else "شاعر" }',value=False)
+
+ngram_all = verses.groupby(by=[groupby_var])['verse'].count() if not show_sentiments else verses.groupby(by=[groupby_var])['sentiment'].mean()
 
 cols = st.beta_columns([1,1])
-with cols[0]: only_whole_word = st.checkbox(label='کلمه فقط به شکل کامل',value=True)
-with cols[1]: compute_proportion = st.checkbox(label=f'نسبت به تعداد کل‌ شعرهای هر {"قرن" if groupby_var=="century" else "شاعر" }',value=True)
+with cols[0]: 
+    only_whole_word = st.checkbox(label='کلمه فقط به شکل کامل',value=True)
+with cols[1]: 
+    if not show_sentiments: compute_proportion = st.checkbox(label=f'نسبت به کل‌ شعرهای هر {"قرن" if groupby_var=="century" else "شاعر" }',value=not show_sentiments)
 
 df = pd.DataFrame()
 words_list=[]
@@ -50,9 +76,12 @@ if len(words)>0:
     words_list = words.split('،')
     words_list = [w.strip() for w in words_list]
     for w in words_list:
-        ngram = verses[ (verses['verse'].str.contains(' '+w+' ')) | (verses['verse'].str.startswith(w+' ')) | (verses['verse'].str.endswith(' '+w)) ].groupby(by=[groupby_var])['verse'].count() \
-            if only_whole_word else verses[ (verses['verse'].str.contains(w))].groupby(by=[groupby_var])['verse'].count()
-        ngram = (100 if compute_proportion else ngram_all) * (ngram / ngram_all) # Hack to keep empty groups in the df as 0 values
+        if show_sentiments:
+            ngram = verses[ (verses['verse'].str.contains(' '+w+' ')) | (verses['verse'].str.startswith(w+' ')) | (verses['verse'].str.endswith(' '+w)) ].groupby(by=[groupby_var])['sentiment'].mean() if only_whole_word else verses[ (verses['verse'].str.contains(w))].groupby(by=[groupby_var])['sentiment'].mean()
+            ngram = (ngram_all) * (ngram / ngram_all) # Hack to keep empty groups in the df as 0 values
+        else: 
+            ngram = verses[ (verses['verse'].str.contains(' '+w+' ')) | (verses['verse'].str.startswith(w+' ')) | (verses['verse'].str.endswith(' '+w)) ].groupby(by=[groupby_var])['verse'].count() if only_whole_word else verses[ (verses['verse'].str.contains(w))].groupby(by=[groupby_var])['verse'].count()
+            ngram = (100 if compute_proportion else ngram_all) * (ngram / ngram_all) # Hack to keep empty groups in the df as 0 values
         
 
         df[w] = ngram
@@ -67,9 +96,9 @@ fig = px.bar(df,y=groupby_var,x=words_list,orientation='h',barmode='group',heigh
 
 
 fig.update_layout(
-    title=f"نسبت استفاده از کلمات مختلف در شعر فارسی در گذر زمان و بین شعرای مختلف",
+    title=f"{'حس' if show_sentiments else 'نسبت استفاده از'} کلمات مختلف در شعر فارسی در گذر زمان و بین شعرای مختلف",
     yaxis_title="‌قرن هجری " if groupby_var=='century' else 'شاعر' ,
-    xaxis_title=f" {'درصد' if compute_proportion else 'تعداد'} مصراع‌های دارای کلمه‌ی مورد نظر ",
+    xaxis_title=f" {'میانگین حس' if show_sentiments else ( 'درصد' if compute_proportion else 'تعداد' )} مصراع‌های دارای کلمه‌ی مورد نظر ",
     legend_title="کلمه",
     font=dict(
         family="Courier New, monospace",
